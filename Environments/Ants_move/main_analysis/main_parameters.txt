@@ -1,0 +1,13 @@
+n = 300
+Lx = 32
+Ly = 32
+delta = 0.3
+beta = 4.5
+eta = 0.07
+decay_rate = 0.015
+eta_special = 0
+delta_special = 0.3
+beta_special = 4.5
+n_special = 2
+t_transient = 200
+tmax = 1200

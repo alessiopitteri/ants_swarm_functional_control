@@ -1,0 +1,18 @@
+critic:
+  type: cnn  # 'mlp' or 'cnn'
+  cnn_layers:  # Layers for processing state input
+    - filters: 128
+      kernel_size: 2
+      stride: 1
+      activation: relu
+      use_batchnorm: true
+  action_layers: []
+  dense_layers:  # Shared layers after concatenation of state and action
+    - units: 128
+      activation: relu
+      use_batchnorm: true
+    - units: 64
+      activation: relu
+      use_batchnorm: true
+  output:  # Output layer configuration
+    activation: linear  # Default for critic's output
