@@ -16,7 +16,7 @@ python Environments/Ants_move_rand/PPO/learning.py
 > **Output:** Results and network weights are saved in the `edge_spen/lx/` directory.
 
 ### 2. Specific Setup
-Training on a specific $\beta$-$\delta$ parameter setup:
+Training on a specific $\beta-\delta$ parameter setup:
 ```bash
 python Environments/Ants_move/PPO/learning.py
 ```
