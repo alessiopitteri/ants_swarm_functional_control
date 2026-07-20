@@ -1,6 +1,31 @@
-# ants_swarm_functional_control
-To perform the RL training in the normal smart-setup (beta and delta randomly chosen from the parameters sets) run Environments/Ants_move_rand/PPO/learning.py with policy x = 0,..,9
-This will produce as output in the edge_spen/lx folder the results and the network weights.
-Then to test the policies in the whole phase diagram and visualize the behavior run the test_gridplot.ipynb notebook.
-For the RL training in the specific beta-delta setup and run Environments/Ants_move/PPO/learning.py with policy x = 0,..,9
-Measures can be computed in Environments/Ants_move(_rand)/PPO/banchmark_test_*.ipynb
+# Ants Swarm Functional Control
+
+Repository for Reinforcement Learning (RL) training, policy evaluation, and benchmark analysis for ant swarm functional control.
+
+---
+
+## Training
+
+Run the training scripts for policy `x = 0, ..., 9`.
+
+### 1. Smart-Setup (Random Parameters)
+Training where $\beta$ and $\delta$ are randomly chosen from the parameter sets:
+```bash
+python Environments/Ants_move_rand/PPO/learning.py
+```
+> **Output:** Results and network weights are saved in the `edge_spen/lx/` directory.
+
+### 2. Specific Setup
+Training on a specific $\beta$-$\delta$ parameter setup:
+```bash
+python Environments/Ants_move/PPO/learning.py
+```
+
+---
+
+## Evaluation & Analysis
+
+* **Phase Diagram & Behavior Visualization:** Run the `test_gridplot.ipynb` notebook to test policies across the entire phase diagram and visualize behavior.
+* **Performance Measures:** Compute metrics using the benchmark notebooks:
+  * For Random Setup: `Environments/Ants_move_rand/PPO/benchmark_test_*.ipynb`
+  * For Specific Setup: `Environments/Ants_move/PPO/benchmark_test_*.ipynb`
