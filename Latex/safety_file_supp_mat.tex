@@ -1,0 +1,1026 @@
+\newpage
+\clearpage
+
+% \pagestyle{fancy}
+\fancyhf{} % pulisce tutto
+
+% \fancyhead[LE,RO]{\thepage} % LE = Left Even, RO = Right Odd
+\setcounter{page}{1}       
+\setcounter{section}{0}    
+\setcounter{figure}{0}     
+\setcounter{table}{0}      
+\setcounter{equation}{0}   
+
+\begin{comment}
+\renewcommand{\thesection}{SM\arabic{section}} % Section S1
+\renewcommand{\thepage}{SM\arabic{page}}
+\renewcommand{\thefigure}{SM\arabic{figure}}
+\renewcommand{\thetable}{SM\arabic{table}}
+\renewcommand{\theequation}{SM\arabic{equation}}
+
+\makeatletter
+\renewcommand{\theHsection}{SM\arabic{section}}
+\renewcommand{\theHfigure}{SM\arabic{figure}}
+\renewcommand{\theHtable}{SM\arabic{table}}
+\renewcommand{\theHequation}{SM\arabic{equation}}
+\makeatother
+
+\begin{center}
+    % \vspace*{2cm} 
+    {\LARGE \bfseries Supplementary Materials} \\[0.5cm]
+    % \vspace*{1cm}
+\end{center}
+\end{comment}
+
+\section{Supplementary Materials}
+\subsection{RL algorithm: Proximal Policy Optimization}
+\label{sec:ppo}
+Proximal Policy Optimization (PPO) \cite{ppo} is a policy gradient actor-critic algorithm for solving RL problems in an online, model-free setting. The algorithm employs an \textit{actor policy} with parameters $\theta$, which defines the stochastic policy $\pi_{\theta}$ modeling the decisions of the agent, and a \textit{critic policy} with parameters $\phi$, representing the parameterized value function $V_{\phi}$. 
+
+PPO optimizes the expected return by directly updating the actor parameters $\theta$ while using the critic $V_{\phi}$ to provide advantage estimates. Importantly, it ensures that each policy update remains within a trust region around the current policy, preventing excessively large updates that could destabilize learning. This is achieved by updating $\theta$ in order to maximize the following clipped objective function:
+\begin{equation}
+\label{eq:ppo-objective}
+    L(\theta) = \mathbb{E}_{t} \left[ \min \left( \, \dfrac{\pi_{\theta}(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)} \cdot \hat{A}_{t}, \; \text{clip}\left( \, \dfrac{\pi_{\theta}(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}, \, 1 - \epsilon, \, 1 + \epsilon \, \right) \cdot \hat{A}_{t} \,\right) \right], 
+\end{equation}
+where $\pi_{\theta}$ is the current policy, $\pi_{\theta_{\text{old}}}$ is the previous policy, $\epsilon$ is a small hyperparameter, and $\hat{A}_t$ is an estimator of the advantage function at time $t$. The advantage function is typically estimated using Generalized Advantage Estimation (GAE), i.e.,
+\begin{equation}
+\label{eq:gae}
+    \hat{A}_t = \sum_{l=0}^{\infty} (\gamma \lambda)^l \, \delta_{t+l}, \quad \text{with } \delta_t = r_t + \gamma \, V_{\phi}(s_{t+1}) - V_{\phi}(s_t),
+\end{equation}
+where $\lambda \in [0,1]$ is the GAE parameter \cite{ppo} controlling the bias–variance trade-off in the advantage estimate. An additional entropy regularization term can be added to encourage exploration and prevent premature deterministic policies. The entropy of the policy at state $s_t$ is defined as
+\begin{equation}
+    \mathcal{H}(s_t; \,  \theta) = - \sum_{a} \pi_\theta(a \mid s_t) \, \log \pi_\theta(a \mid s_t),
+\end{equation}
+and the final actor objective becomes
+\begin{equation}
+    \mathcal{L}_{\text{a}}(\theta) = \mathbb{E}_{t} \Big[ L(\theta) + c \, \mathcal{H}(s_t; \theta) \Big],
+    \label{eq:ppo-objective-final}
+\end{equation}
+where $c$ is a hyperparameter controlling the strength of the entropy bonus. The optimization of Eq. \ref{eq:ppo-objective-final} is carried out via  multiple epochs of stochastic gradient ascent on mini-batches sampled from trajectories of states and actions collected by employing the current policy $\pi_{\theta}$ to generate the actions, and measuring the next state from the environment.
+The critic parameters $\phi$ are instead updated by minimizing the loss $\mathcal{L}_{\text{c}}$ between the values $V_{\phi}(s_t)$ predicted by the parameterized value function and the returns $\mathcal{G}(\tau_t)$ computed according to Eq. \ref{eq:disc-cum-rwd}.
+
+% \clearpage
+
+\subsection{RL training: tuning and evolution of the performance}
+In this section, we first describe the learning procedure employed to train the smart-agents. Then, we include and comment the evaluation of the main metrics during learning. 
+
+\subsubsection{Training}
+\label{sec:training_res}
+
+The employed training procedure involves a number $N_{epi}$ of repeated episodes. Each episode consists of a simulation of the environment such that, in addition to the ABM-ants, $N' = 30$ smart-agents are introduced into the environment after $t = T_{tr} = 200$ time-steps and remain active until the end of the episode, at $t = T = 1200$. Each smart-agent releases $\eta' = 1$ unit of pheromone at every time-step, performs an action, and collects data. Such data are then used to perform a learning step via RL, after the end of the episode and before the next. 
+
+The interaction with the environment, reflected in the collected data, follows the classic RL scheme: a local state $s_t^{(n)}$ is observed by an agent $n$ at time $t$, which then performs an action $a_t^{(n)}$ sampled from the discrete probability distribution produced by actor network given as input $s^{(n)}_t$. It then observes a new state $s^{(n)}_{t+1}$, and receives a reward $r_t^{(n)}$. The experience collected in one episode is then saved in dataset made by tuples $(s_t^{(n)}, \, a_{t}^{(n)}, \, r_{t}^{(n)}, \, s_{t+1}^{(n)})$, one per each time-steps $t= T_{tr} \dots T$ and per each agent $n=1 \dots N'$.
+
+After the end of the episode, the collected data are all sampled once in batches of size $b_{size}=60$, and used to optimize the actor and the critic parameters, employing the PPO algorithm. Our PPO-based scheme follows the \textit{centralized training, decentralized execution} paradigm, where all agents transmit their collected data to a central node hosting the actor and critic policies, that are shared. Both the actor and critic policies are parameterized using neural networks. The networks are initialized at random, and consist of two convolutional layers with $32$ and $16$ filters respectively, each using a $3 \times 3$ kernel and a stride of 1, followed by two fully connected layers with $256$ and $128$ units, and a final linear output layer. All layers, except the output, employ a ReLU activation function and batch normalization is applied after every layer.
+The actor network outputs $8$ logits $z$, which define a categorical distribution via
+\[
+\pi_\theta(a_t^i \mid s_t) = 
+\frac{\exp(z_i)}{\sum_{j=1}^8 \exp(z_j)}, 
+\quad i=1,\dots,8.
+\]
+
+We augment the critic loss $\mathcal{L}_{\text{c}}$ described in Section \ref{sec:ppo} with a term defined by the Smooth L1 function \cite{smoothl1}, defined as
+\[
+\text{SmoothL1}(x) =
+\begin{cases}
+\frac{1}{2}x^{2}, & \text{if } |x| < 1,\\[5 pt]
+|x| - \frac{1}{2}, & \text{otherwise},
+\end{cases}
+\]
+where $x = V_\phi(s_t) - \mathcal{G}(\tau_t)$, with $\mathcal{G}(\tau_t)$ the return (Eq. \ref{eq:disc-cum-rwd}) and $V_\phi(s_t)$ the parametrized value function. This is usually done to improve stability, by making the loss quadratic for small errors but linear for large errors, reducing the impact of outliers.
+The actor optimization is performed using a clipped surrogate loss $\mathcal{L}_{\text{a}}$ (see Eq. \ref{eq:ppo-objective-final}), with clipping parameter $\epsilon = 0.2$, together with an entropy bonus weighted by the coefficient $c=0.05$ to encourage exploration; GAE, defined in Eq. \ref{eq:gae}, is employed with parameter $\lambda = 0.95$.
+\begin{algorithm}[t]
+\caption{Centralize-Training Decentralize-Execution PPO}
+\label{alg:ppo}
+\begin{algorithmic}[1]
+\Require actor network $\pi_\theta$, critic network $V_\phi$
+\Require clip parameter $\epsilon$, entropy coefficient $c_{\mathrm{ent}}$, discount $\gamma$, GAE parameter $\lambda$
+\Require episodes $N_{epi}$, mini-batch size $b_{size}$
+\State Initialize parameters $\theta, \phi$
+\Repeat
+    \State Collect trajectories $\{(s_t^{(n)},a_t^{(n)},r_t^{(n)},s_{t+1}^{(n)})\}_{t=0}^{T-1}$ using $\pi_\theta \,\forall$ agent $n$
+    \State Compute returns $R_t^{(n)}$ and advantages $\hat{A}_t^{(n)}$ with GAE
+    \State Store old log-probabilities $\ell_{\theta_{\mathrm{old}}}(a_t^{(n)}\mid s_t^{(n)})=\log(\pi_{\theta_{\text{old}}}(a^{(n)} \mid s_t^{(n)})$
+    \For{episode = 1 to $N_{epi}$}
+        \State Divide trajectories into mini-batches of size $b_{size}$
+        \For{each mini-batch}
+            \State \textbf{Actor update:}
+            \begin{align*}
+            \psi_t^{(n)}(\theta) 
+                &= \frac{\ell_{\theta}(a_t^{(n)} \mid s_t^{(n)})}
+                        {\ell_{\theta_{\mathrm{old}}}(a_t^{(n)} \mid s_t^{(n)})}, \\
+            L_t(\theta) 
+                &= \min\!\Big( \psi_t^{(n)}(\theta)\hat{A}_t^{(n)}, \; 
+                   \mathrm{clip}(\psi_t^{(n)}(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t^{(n)} \Big), \\
+            \mathcal{H}(s_t^{(n)} ; \theta)
+                &= - \sum_{a} \pi_\theta(a \mid s_t^{(n)}) 
+                   \log \pi_\theta(a \mid s_t^{(n)}), \\
+            \mathcal{L}_{\mathrm{a}}(\theta) 
+                &= - \frac{1}{b_{size}}\sum_{t \in b_{size}}\Big( L_t(\theta) 
+                   + c_{\mathrm{ent}} \,\mathcal{H}(s_t^{(n)} ; \theta) \Big).
+            \end{align*}
+
+
+            \State Update actor parameters $\theta \leftarrow \theta - \eta_\theta \nabla_\theta \mathcal{L}_{\mathrm{a}}(\theta)$
+            \State \textbf{Critic update:}
+            \[
+            \mathcal{L}_{\mathrm{c}}(\phi) = \frac{1}{b_{size}}\sum_{t\in b_{size}} \mathrm{SmoothL1}\big(V_\phi(s_t^{(n)}), R_t^{(n)}\big)
+            \]
+            \State Update critic parameters $\phi \leftarrow \phi - \eta_\phi \nabla_\phi \mathcal{L}_{\mathrm{c}}(\phi)$
+        \EndFor
+    \EndFor
+    \State Set $\theta_{\mathrm{old}} \leftarrow \theta$ and $\phi_{\mathrm{old}} \leftarrow \phi$ for next iteration
+\Until{convergence}
+\end{algorithmic}
+\end{algorithm}
+We use the Adam optimizer \cite{Adam} to update both the actor and critic networks, with separate learning rates $\text{lr}_a = 5 \times 10^{-6}$ and $\text{lr}_c = 5 \times 10^{-5}$, respectively. The Adam momentum parameters are set to their default values, namely $\beta_1 = 0.9$, $\beta_2 = 0.999$. Algorithm \ref{alg:ppo} contains full details on the employed PPO steps. At the end of the actor and critic update phase, the data of the current episode are discarded, hence the learning at the end of the episode happens exclusively by exploiting recent experience, collected by the last version of the actor policy. To ensure statistical robustness of our observations we conducted $n_{\pi} = 10$ independent training procedures (differently seeded for reproducibility).
+\subsubsection{Basic training scenario}
+\label{sec:learning_policy_var}
+\paragraph{Learning evolution.}
+In the first training scenario, constituted by $N_{epi} = 3000$, ABM-ants are characterized by sensory parameters $\left[\delta, \, \beta \right]$ that are randomly sampled at the beginning of each episode from the predefined sets $\mathsf{s}_\beta$ and $\mathsf{s}_\delta$ defined in Section \ref{sec:sim_phasetrans}. The evaluation of the order parameters (Eqs. \ref{eq:op-M} - \ref{eq:op-m}) during training provides insight into the phase of the system, (and in particular the value achieved at the final step of the episode, when the scenario is at equilibrium), while the average reward serves as an indicator of the emergence of a populated trail. 
+In Figure \ref{fig:avg_res_rand} (that contains the evolution of these indicators across successive episodes, averaged among $n_{\pi} = 10$ learning realizations) both the average rewards $\langle r \rangle$ and the density order parameter per episode  initially increase, but they eventually converge to lower values in this case, exhibiting stronger fluctuations. This reflects the presence in training of $\left[\delta , \beta \right]$-configurations that are more difficult (or even impossible) to control, at high noise and low sensitivity (bottom-right corner of Figure \ref{fig:rand_gridplot}). To further assess the evolution of the policy performance throughout learning, per each of the $n_{\pi}$ training procedures we conduct intermediate evaluations of the last updated version of the actor every $10$ episodes. The corresponding averaged reward trajectories are shown in Figure \ref{fig:avg_epi_rand}. The improvement of the smart-agents is evident, as rewards obtained in early episodes (green curves) are consistently lower than those accumulated in later episodes (yellow curves), indicating that the smart-agents on average improve their performance as training progresses, even if the couple $\left[\delta , \beta \right]$, that determined the test configuration, is chosen at random from the sets. 
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/avg_res_rand.pdf}
+        \caption{}
+        \label{fig:avg_res_rand}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/avg_epi_rand.pdf}
+        \caption{}
+        \label{fig:avg_epi_rand}
+    \end{subfigure}
+    \caption{\textbf{Basic training scenario: metrics in training, averaged over $n_{\pi}=10$ learning realizations.} (a) The evolution of the average reward $\langle r \rangle$ across episodes exhibits noticeable variability due to randomly sampled ABM-ant sensory parameters. The order parameters $M(T)$ and $m(T)$ fluctuate accordingly, reflecting population-dependent differences in trail formation efficiency. (b) The averaged reward trajectories along an episode show gradual improvement over training episodes despite the realization variability. Later episodes tend to achieve higher rewards than earlier ones, although convergence presents small fluctuations, indicating the presence of stochasticity. Early progress is fast, then the curve stabilize, hence rewards have been plotted on episodes corresponding to a geometric scale.}
+    \label{fig:combined_rand_figures}
+\end{figure}
+
+\paragraph{Policy analysis.}
+Gaining a detailed understanding of how the smart-agents, using a shared policy, are able to generate and maintain a stable trail that is also followed by the ABM-ants is particularly challenging due to the high dimensionality of the state space. Rather than attempting a full characterization of the policy, we therefore focus on alternative forms of analysis. Specifically, we examine a set of representative or critical scenarios, as well as the history of actions executed during the testing phase, in order to extract qualitative insights into the emergent behaviors and decision-making strategies learned by the agents.
+
+In particular, we analyze the choices made by the policy in synthetic states, showcasing scenarios of interest. The synthetic states shown in Figure \ref{fig:policies} are constructed as follows. In the first channel, a baseline pheromone value of $10$ is assigned to desired sites. In the second channel, one ABM-ant is placed at the same locations, while the third channel contains a single smart-agent positioned at the center. For each synthetic state, we generate eight samples, one for each possible direction of motion (populating the fourth channel). These states are then passed through the actor, obtained in the basic training scenario, to compute the probabilities of the eight possible actions for each of the $n_\pi$ policy trained in the random configuration scenario. Finally, the probabilities are averaged over all directions and the policies, to characterize the learned behavior in an unbiased manner. In the first example (Figure \ref{fig:policy1}), the smart-agent located at the center continues to reinforce the existing trail with high probability ($\sim 80\%$). Non-diagonal moves are discouraged, as they would increase connectivity, and only $\sim 10\%$ of the time does the agent attempt to create a new diagonal path. In the second example (Figure \ref{fig:policy2}), the smart-agent is attracted to the pheromone trail in the bottom-right area of its field of view (with probability $\sim 35\%$), while still maintaining some tendency to explore. Finally, in the third example (Figure \ref{fig:policy3}), the smart-agent is strongly driven to fill the gap. Diagonal actions remain more likely, even though the existing trail is horizontal. This behavior has also been observed in the original ant swarm model, where diagonal trails emerge without any bias introduced by a learned policy.\\
+
+In Figure \ref{fig:initial-phase}, we show the trajectories of the $N' = 30$ smart-agents during the first $t = 100$ time-steps of a test using one of the candidate policies trained in the basic training scenario, alongside a population of ABM-agents with randomly chosen sensory parameters $(\beta = 6.5, \, \delta = 0.5)$. This initial phase is particularly interesting to analyze, as it allows us to observe how the main trails are formed. From Figure \ref{fig:initial-phase} we can observe that, initially, the smart-agents explore the search space more stochastically, shaping the pheromone field through their exploration. Over time, they progressively concentrate on the most promising trails, reinforcing them and guiding the collective behavior toward stronger solutions. After this period, a high-reward configuration emerges and also the ABM-ants begin to follow it consistently. 
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/policy_1.png}
+        \caption{}
+        \label{fig:policy1}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/policy_2.png}
+        \caption{}
+        \label{fig:policy2}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/policy_3.png}
+        \caption{}
+        \label{fig:policy3}
+    \end{subfigure}
+    \caption{\textbf{Examples of policy in synthetic states.} In blu the sites with more pheromones than the average seen by the smart-agent in the center, in red the probabilities to jump to neighbors sites.}
+    \label{fig:policies}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.8\linewidth]{images/b65d05_policy.png}
+    \caption{\textbf{Trajectories of smart-agents in the initial phase.} Shown are the paths of $N' = 30$ smart-agents during the first $t = 100$ time-steps in a test using ABM-ants ($\beta = 6.5, \, \delta = 0.5$). Trajectories are colored from blue to yellow to indicate the passage of time. This early phase highlights the formation of main trails, as smart-agents initially explore the environment rapidly and subsequently converge on a single path that maximizes their reward.
+}
+    \label{fig:initial-phase}
+\end{figure}
+
+\subsubsection{Limited training scenario: ABM with $\left[ \delta^* = 0.3, \,\beta^* = 4.5 \right]$}
+\label{sec:learning_policy_spec}
+
+\paragraph{Learning evolution.}
+The second training scenario considers $N_{epi} = 2000$ episodes with ABM-ants characterized, in each episode, by sensory parameter pair $\left[ \delta^* = 0.3, \,\beta^* = 4.5 \right]$. As shown in Figure \ref{fig:avg_res_nonrand}, the average reward $\langle r \rangle$ per episode progressively increases over training and approaches values closer to $0$ compared to the initial episodes. A similar trend is observed for the order parameters, which converge toward values close to their maximum of $1$. Together, these behaviors indicate the emergence of a stable trail structure, consistent with the observations discussed in Section \ref{sec:Results}, and analogous to what seen in the basic training scenario. The corresponding averaged reward trajectories are shown in Figure \ref{fig:avg_epi_nonrand}.  The improvement of the smart-agents, as in the previous case, is evident.
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/avg_res_nonrand.pdf}
+        \caption{}
+        \label{fig:avg_res_nonrand}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/avg_epi_nonrand.pdf}
+        \caption{}
+        \label{fig:avg_epi_nonrand}
+    \end{subfigure}
+    \caption{\textbf{Limited training case: metrics in training, averaged over $n_{\pi}=10$ learning realizations.} (a) The evolution of the average reward $\langle r \rangle$ across episodes shows a steady improvement. This, jointly with the convergence of the order parameters, at the final time-step $t=T$, $M(T)$ and $m(T)$ toward $1$, indicate the evolution of the policy towards behaviors promoting the emergence of a pheromone trail, consistently populated by ABM-ants. (b) The averaged reward trajectories along an epsode show consistently higher rewards in later episodes (yellow curves) compared to early ones. Moreover, the individual curves appear to become gradually more monotonically increasing, indicating that the policy learns behaviors that enhance trail formation and does so increasingly faster within each episode. Early progress is fast, then the curve stabilize, hence rewards have been plotted on episodes corresponding to a geometric scale.}
+    \label{fig:combined_abm_figures}
+\end{figure}
+
+\subsection{Additional results}
+\subsubsection{Basic training scenario: testing}
+\label{sec:additional_res_var}
+\paragraph{Final pheromone and individual concentrations.}
+Figures \subref{sfig:l1_ants} and \subref{sfig:l1_pher}, associated at the policy $\pi=1$, exhibit qualitatively different
+    behavior from the others, consistent with its poor training outcome in terms of average reward.
+    Figures \subref{sfig:l3_ants}, \subref{sfig:l3_pher}, \subref{sfig:l4_ants}
+    and \subref{sfig:l4_pher} (policies $\pi=3,4$) occasionally fail to form trails, though the success
+    rate appears to depend on the stochasticity of the system rather than on the sensory parameters.
+    All remaining policies consistently reproduce the desired behavior observed in the Section \ref{sec:Results}
+    with policy $\pi=0$, characterized by a shift of the phase line.
+
+% ==========================================
+% FIRST FIGURE (Policies n=1 to n=3)
+% ==========================================
+\begin{figure}[H]
+    \centering
+    % Policy n=1
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l1_pher.png}
+        \caption{}
+        \label{sfig:l1_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l1_ants.png}
+        \caption{}
+        \label{sfig:l1_ants}
+    \end{subfigure}
+    \vspace{0.2cm} % Space between rows
+
+    % Policy n=2
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l2_pher.png}
+        \caption{}
+        \label{sfig:l2_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l2_ants.png}
+        \caption{}
+        \label{sfig:l2_ants}
+    \end{subfigure}
+    \vspace{0.2cm}
+
+    % Policy n=3
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l3_pher.png}
+        \caption{}
+        \label{sfig:l3_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l3_ants.png}
+        \caption{}
+        \label{sfig:l3_ants}
+    \end{subfigure}
+
+    \caption{\textbf{Basic training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for policies n=1 to n=3.} 
+    \label{fig:grid_1to3}
+\end{figure}
+
+\newpage % Force a new page if necessary, or just place them sequentially
+
+% ==========================================
+% SECOND FIGURE (Policies n=4 to n=6)
+% ==========================================
+\begin{figure}[H]
+    \centering
+    % Policy n=4
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l4_pher.png}
+        \caption{}
+        \label{sfig:l4_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l4_ants.png}
+        \caption{}
+        \label{sfig:l4_ants}
+    \end{subfigure}
+    \vspace{0.2cm}
+
+    % Policy n=5
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l5_pher.png}
+        \caption{}
+        \label{sfig:l5_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l5_ants.png}
+        \caption{}
+        \label{sfig:l5_ants}
+    \end{subfigure}
+    \vspace{0.2cm}
+
+    % Policy n=6
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l6_pher.png}
+        \caption{}
+        \label{sfig:l6_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l6_ants.png}
+        \caption{}
+        \label{sfig:l6_ants}
+    \end{subfigure}
+
+    \caption{\textbf{Basic training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for policies n=4 to n=6.} 
+    \label{fig:grid_4to6}
+\end{figure}
+
+\newpage
+
+% ==========================================
+% THIRD FIGURE (Policies n=7 to n=9)
+% ==========================================
+\begin{figure}[H]
+    \centering
+    % Policy n=7
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l7_pher.png}
+        \caption{}
+        \label{sfig:l7_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l7_ants.png}
+        \caption{}
+        \label{sfig:l7_ants}
+    \end{subfigure}
+    \vspace{0.2cm}
+
+    % Policy n=8
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l8_pher.png}
+        \caption{}
+        \label{sfig:l8_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l8_ants.png}
+        \caption{}
+        \label{sfig:l8_ants}
+    \end{subfigure}
+    \vspace{0.2cm}
+
+    % Policy n=9
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l9_pher.png}
+        \caption{}
+        \label{sfig:l9_pher}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{images/l9_ants.png}
+        \caption{}
+        \label{sfig:l9_ants}
+    \end{subfigure}
+
+    \caption{\textbf{Basic training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for the remaining 3 policies (n=7 to n=9). (Ref: Original 9-policy grid.)} 
+    \label{fig:grid_7to9}
+\end{figure}
+\begin{comment}
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[b]{0.3\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/cavgbase50.png}
+        \caption{}
+        \label{fig:bas50_global}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.3\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/cavgenh50.png}
+        \caption{}
+        \label{fig:enh50_global}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.3\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/cavgrand50.png}
+        \caption{}
+        \label{fig:rand50_global}
+    \end{subfigure}
+     \caption{\textbf{Trail scenario metric $\langle \mathcal{TS} \rangle_{50}$ across the phase diagram}: (a) baseline scenario; (b) enhanced hybrid scenario; (c) smart hybrid scenario.}
+    \label{fig:global50_metric}
+\end{figure}
+\begin{table}[h!]
+\centering
+\resizebox{0.6\textwidth}{!}{
+\begin{tabular}{|l|rrrrrr|}
+\toprule 
+$\quad$ & $\quad$ & $\quad$ & $\langle\mathcal{TS}\rangle_{50}$ & $\quad$ & $\quad$ & $\quad$\\
+\midrule
+\diagbox[innerwidth=0.4cm]{$\beta$}{$\delta$} & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 \\
+\midrule
+$\quad$ & \multicolumn{2}{l}{baseline} & $\quad$ & $\quad$ & $\quad$ & $\quad$ \\
+\midrule
+9.5 & -1.66           & \textbf{-1.43}  & \textbf{-0.62} & \textbf{-1.11}  & \textbf{-0.55} & \textbf{-1.02} \\
+8.5 & \textbf{-1.03}  & \textbf{-1.21}  & \textbf{-0.60} & \textbf{-1.36}  & -1.76          & -1.66 \\
+7.5 & \textbf{-0.79}  & \textbf{-0.72}  & \textbf{-0.97} & -2.39           & -5.78          & -7.36 \\  
+6.5 & -2.79           & -5.00           & -7.63          & -11.41          & -9.36          & -8.15 \\
+5.5 & -9.67           & -8.18           & -9.81          & -9.31           & -9.02          & -9.49 \\
+4.5 & -11.09          & -10.04          & -9.36          & -10.76          & -9.43          & -9.94 \\
+3.5 & -9.83           & -10.33          & -9.74          & -9.62           & -9.83          & -9.84 \\
+\midrule
+$\quad$ & \multicolumn{3}{l}{enhanced hybrid} & $\quad$ & $\quad$  & $\quad$  \\
+\midrule
+9.5 & -9.32          & -8.57          & -7.50          & -5.78          & -3.06          & \textbf{-1.47} \\
+8.5 & -8.72          & -8.43          & -5.02          & -2.85          & -1.80          & \textbf{-1.33} \\
+7.5 & -7.09          & -5.25          & -2.54          & -1.75          & -1.66          & \textbf{-1.32} \\
+6.5 & -4.93          & \textbf{-1.59} & \textbf{-1.29} & \textbf{-1.20} & \textbf{-1.24} & -1.81 \\
+5.5 & -2.03          & \textbf{-1.18} & \textbf{-1.36} & -1.63          & -2.32          & -3.12 \\
+4.5 & \textbf{-1.01} & \textbf{-1.48} & -2.46          & -2.90          & -3.81          & -4.76 \\
+3.5 & -2.54          & -3.75          & -4.48          & -5.08          & -5.71          & -7.45 \\
+\midrule
+$\quad$ & \multicolumn{3}{l}{smart hybrid} & $\quad$ & $\quad$ & $\quad$   \\
+\midrule
+9.5 & \textbf{-0.73} & \textbf{-1.18} & \textbf{-1.24} & \textbf{-1.02} & \textbf{-1.16} & \textbf{-1.22} \\
+8.5 & \textbf{-1.28} & \textbf{-0.82} & \textbf{-0.85} & \textbf{-1.22} & \textbf{-0.95} & \textbf{-1.17} \\
+7.5 & \textbf{-1.25} & \textbf{-1.11} & \textbf{-1.17} & -1.68          & -1.62          & \textbf{-1.17} \\
+6.5 & \textbf{-1.16} & \textbf{-0.86} & \textbf{-1.44} & \textbf{-1.38} & \textbf{-1.11} & -1.87          \\
+5.5 & \textbf{-1.08} & \textbf{-1.19} & \textbf{-1.14} & \textbf{-1.50} & \textbf{-1.50} & \textbf{-1.51} \\
+4.5 & \textbf{-1.18} & \textbf{-0.90} & \textbf{-1.33} & -1.97          & -\textbf{1.59} & -2.66          \\
+3.5 & \textbf{-1.41} & -1.86          & -2.45          & -2.75          & -2.71          & -2.70          \\
+ \bottomrule
+\end{tabular}
+}
+\caption{\textbf{Average trails scenario metric per each $[\delta, \beta]$-configuration}. Simulation settings included: (1) $N$ ABM-ants (baseline population) (2) baseline population mixed with $N_{\eta=1}$ ABM-ants releasing higher pheromone (enhanced hybrid),(3) baseline population plus $N'$ smart-agents trained across the full phase space (smart hybrid).}
+ \label{tab:global50-separate}
+\end{table}
+\end{comment}
+
+\begin{figure}[t]
+    \centering
+    
+    % Left side: table
+    \begin{minipage}{0.65\textwidth}
+        \centering
+        \resizebox{0.99\textwidth}{!}{
+        \begin{tabular}{|l|rrrrrr|}
+        \toprule 
+        $\quad$ & $\quad$ & $\quad$ & $\langle\mathcal{TS}\rangle_{50}$ & $\quad$ & $\quad$ & $\quad$\\
+        \midrule
+        \diagbox[innerwidth=0.4cm]{$\beta$}{$\delta$} & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 \\
+        \midrule
+        $\quad$ & \multicolumn{2}{l}{baseline} & $\quad$ & $\quad$ & $\quad$ & $\quad$ \\
+        \midrule
+        9.5 & -1.66           & \textbf{-1.43}  & \textbf{-0.62} & \textbf{-1.11}  & \textbf{-0.55} & \textbf{-1.02} \\
+        8.5 & \textbf{-1.03}  & \textbf{-1.21}  & \textbf{-0.60} & \textbf{-1.36}  & -1.76          & -1.66 \\
+        7.5 & \textbf{-0.79}  & \textbf{-0.72}  & \textbf{-0.97} & -2.39           & -5.78          & -7.36 \\  
+        6.5 & -2.79           & -5.00           & -7.63          & -11.41          & -9.36          & -8.15 \\
+        5.5 & -9.67           & -8.18           & -9.81          & -9.31           & -9.02          & -9.49 \\
+        4.5 & -11.09          & -10.04          & -9.36          & -10.76          & -9.43          & -9.94 \\
+        3.5 & -9.83           & -10.33          & -9.74          & -9.62           & -9.83          & -9.84 \\
+        \midrule
+        $\quad$ & \multicolumn{3}{l}{enhanced} & $\quad$ & $\quad$  & $\quad$  \\
+        \midrule
+        9.5 & -9.32          & -8.57          & -7.50          & -5.78          & -3.06          & \textbf{-1.47} \\
+        8.5 & -8.72          & -8.43          & -5.02          & -2.85          & -1.80          & \textbf{-1.33} \\
+        7.5 & -7.09          & -5.25          & -2.54          & -1.75          & -1.66          & \textbf{-1.32} \\
+        6.5 & -4.93          & \textbf{-1.59} & \textbf{-1.29} & \textbf{-1.20} & \textbf{-1.24} & -1.81 \\
+        5.5 & -2.03          & \textbf{-1.18} & \textbf{-1.36} & -1.63          & -2.32          & -3.12 \\
+        4.5 & \textbf{-1.01} & \textbf{-1.48} & -2.46          & -2.90          & -3.81          & -4.76 \\
+        3.5 & -2.54          & -3.75          & -4.48          & -5.08          & -5.71          & -7.45 \\
+        \midrule
+        $\quad$ & \multicolumn{3}{l}{smart} & $\quad$ & $\quad$ & $\quad$   \\
+        \midrule
+        9.5 & \textbf{-0.73} & \textbf{-1.18} & \textbf{-1.24} & \textbf{-1.02} & \textbf{-1.16} & \textbf{-1.22} \\
+        8.5 & \textbf{-1.28} & \textbf{-0.82} & \textbf{-0.85} & \textbf{-1.22} & \textbf{-0.95} & \textbf{-1.17} \\
+        7.5 & \textbf{-1.25} & \textbf{-1.11} & \textbf{-1.17} & -1.68          & -1.62          & \textbf{-1.17} \\
+        6.5 & \textbf{-1.16} & \textbf{-0.86} & \textbf{-1.44} & \textbf{-1.38} & \textbf{-1.11} & -1.87          \\
+        5.5 & \textbf{-1.08} & \textbf{-1.19} & \textbf{-1.14} & \textbf{-1.50} & \textbf{-1.50} & \textbf{-1.51} \\
+        4.5 & \textbf{-1.18} & \textbf{-0.90} & \textbf{-1.33} & -1.97          & -\textbf{1.59} & -2.66          \\
+        3.5 & \textbf{-1.41} & -1.86          & -2.45          & -2.75          & -2.71          & -2.70          \\
+         \bottomrule
+        \end{tabular}
+        }
+    \vspace{0.8cm}
+    \end{minipage}
+    \hfill
+    % Right side: figure
+    \begin{minipage}{0.3\textwidth}
+        \centering
+        
+        \begin{subfigure}[b]{1\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{images/cavgbase50.png}
+            \caption{Baseline}
+            \label{fig:bas50_global}
+        \end{subfigure}
+        \begin{subfigure}[b]{1\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{images/cavgenh50.png}
+            \caption{Enhanced}
+            \label{fig:enh50_global}
+        \end{subfigure}
+        \begin{subfigure}[b]{1\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{images/cavgrand50.png}
+            \caption{Smart}
+            \label{fig:rand50_global}
+        \end{subfigure}
+     
+    \end{minipage}
+    \vspace{0.2cm}
+    \caption{\textbf{Average trails scenario metric per each $[\delta, \beta]$-configuration}: (a) $N$ ABM-ants (baseline population); (b) baseline population mixed with $N_{\eta=1}$ ABM-ants releasing higher pheromone (enhanced); (c) baseline population plus $N'$ smart-agents trained across the full phase space (smart).}
+    \label{fig:global50_metric}
+\end{figure}
+
+\paragraph{Trails scenario metric across the phase diagram.}
+The table and figures in Figure \ref{fig:global50_metric} show the average values of the global metric $\langle \mathcal{TS} \rangle_{50}$ achieved in the baseline, enhanced and smart scenarios introduced in the main part of the paper. Results are obtained by averaging over $n_{e} = 10$ evaluations, one per each of the $n_{\pi}$ policies in the smart-agents scenarios, and $n_{e} = 10$ realizations, one per each seed in baseline and enhanced ABM-ants scenarios. 
+
+The behavior of the metric across the phase diagram is consistent with what is shown in Figures \ref{fig:phasegrid}, \ref{fig:rand_gridplot} and \ref{fig:300_30_gridplot} in terms of trail formation and presence of clustered and random configurations. In particular, in the baseline scenario, the metric exhibits high values in the region above the phase transition line, consistently with its definition, as this is the only region where trails can occur. In the enhanced scenario, the metric consistently shows, as in Figure \ref{fig:300_30_gridplot}, that it is higher in regions where configurations similar to the desired trails are present, and correctly penalizes clustered and random behavior (upper-left and lower-right regions of the phase plot). Finally the smart scenario presents values of the  metric that show improvements across all regions of the phase plot, consistently with Figure \ref{fig:rand_gridplot}, and slightly worse values in the chaotic region (lower-right).
+
+Figure \ref{fig:boxplot-delta-beta-ST50} shows that the average values included for the three settings in Figure \ref{fig:global50_metric} present a trend that is robustly replicated across all the evaluation campaign, spanning all the $(\delta, \, \beta)$-configurations.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{images/boxplot_st_full.png}
+    \caption{\textbf{Trail scenario metric}. Values of $\langle \mathcal{TS} \rangle_{50}$ over all the simulated evaluations, divided per each $(\delta, \, \beta)$-configuration, for the three considered settings: (i) $N$ ABM-ants (base) (ii) baseline population plus $N_{\eta=1}$ ABM-ants releasing higher pheromone (enh),(iii) baseline population plus $N'$ smart-agents (smart). The horizontal dashed line represents the empirical threshold of $-1.6$, observed in relation with trail formation.}
+    \label{fig:boxplot-delta-beta-ST50}
+\end{figure}
+
+\paragraph{Order parameters across the phase diagram.}
+Figures \ref{fig:boxplot-delta-beta-mT}-\ref{fig:boxplot-delta-beta-MT} show the distribution of the order parameters $m(T)$ and $M(T)$, disaggregated with respect to the considered $(\delta, \, \beta)$-configurations. 
+
+The distributions of $m(T)$ and $M(T)$ across the evaluation episodes further corroborate the trends observed from the average values reported in Table \ref{tab:order_par_tab1}. In particular, the boxplots show that, in the smart setup, the configurations characterized by average order parameter values above the empirical threshold of $0.8$ generally exhibit distributions concentrated in the high-value region, with median values above the threshold and limited overlap with lower-order regimes. This indicates that the observed increase in both $m(T)$ and $M(T)$ is not driven by a small number of favorable realizations, but rather reflects a systematic and robust effect across the evaluation testbed. Moreover, several $(\delta, \, \beta)$-configurations located below the phase transition line in the baseline case display a clear upward shift of the entire distribution under the smart control strategy, confirming that the emergence of ordered states occurs consistently over repeated trials. The distributions of $m(T)$ are particularly concentrated near their upper bound in the smart scenario, supporting the conclusion that the control action reliably promotes the formation of highly structured pheromone fields. The distributions of $M(T)$ confirm that the increase in ant recruitment to pheromone trails is observed across a broad range of realizations, although a larger variability remains in the bottom-right region of the phase diagram, where low pheromone sensitivity and high movement randomness reduce the effectiveness of the control action. 
+
+The enhanced setup exhibits distributions of $m(T)$ that are concentrated around lower values, in configurations where structured pheromone patterns fail to emerge consistently (right-bottom corner). With respect to $M(T)$, we can observe that both the smart and the enhanced setups exhibit distributions centered in values lower than $0.8$ in the same $(\delta, \, \beta)$-configurations. The smart setup presents in those cases worse values, due to the limited controllability of systems with low pheromone sensitivity and high movement randomness. This, as previously commented, is explained by observing that, in the baseline and enhanced setups, lower values of $m(T)$ correspond to a more uniform distribution of pheromone across the environment. When combined with the high randomness in agent movement typical of these configurations, this leads to an increased probability that ABM-ants traverse pheromone-containing locations, thereby artificially inflating $M(T)$.
+
+Overall, the distributional analysis confirms that the differences highlighted by the average order parameters are statistically meaningful and reflect genuine shifts in the collective dynamics induced by the control strategies, rather than fluctuations associated with individual evaluation episodes.
+
+\newpage
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{images/boxplot_m_full.png}
+    \caption{\textbf{Distribution of $m(T)$ per each $(\delta, \, \beta)$-configuration}. Simulation settings included: (1) $N$ ABM-ants (base), (2) baseline population mixed with $N_{\eta=1}$ ABM-ants releasing higher pheromone (enh), (3) baseline population plus $N'$ smart-agents trained across the full phase space (smart).}
+    \label{fig:boxplot-delta-beta-mT}
+\end{figure}
+
+\newpage
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{images/boxplot_M_full.png}
+    \caption{\textbf{Distribution of $M(T)$ per each $(\delta, \, \beta)$-configuration}. Simulation settings included: (1) $N$ ABM-ants (base), (2) baseline population mixed with $N_{\eta=1}$ ABM-ants releasing higher pheromone (enh), (3) baseline population plus $N'$ smart-agents trained across the full phase space (smart).}
+    \label{fig:boxplot-delta-beta-MT}
+\end{figure}
+
+\newpage
+
+\subsubsection{Limited training scenario: testing}
+\label{sec:additional_res_spec}
+
+\paragraph{Final pheromone and individual concentrations.}
+The results closely match those obtained in the basic training scenario. Notably, policy $\pi=7$, displayed in Figures \subref{sfig:l7_ants_fix} and \subref{sfig:l7_pher_fix}, failed to converge during training, exhibiting behavior distinct from the other cases. Similarly, policy $\pi=4$ (Figures \subref{sfig:l4_ants_fix} and \subref{sfig:l4_pher_fix}) occasionally fails to form stable trails. All remaining policies consistently replicate the behavior observed in Section \ref{sec:Results} for policy $\pi=9$, which is characterized by a shift in the phase line.
+
+% ==========================================
+% FIGURE 1: Policies n=0, n=1, n=2
+% ==========================================
+\clearpage
+\begin{figure}[H]
+    \centering
+    % Row 1: n=0
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l0_pher_fix.png}
+        \caption{}
+        \label{sfig:l0_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l0_ants_fix.png}
+        \caption{}
+        \label{sfig:l0_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 2: n=1
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l1_pher_fix.png}
+        \caption{}
+        \label{sfig:l1_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l1_ants_fix.png}
+        \caption{}
+        \label{sfig:l1_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 3: n=2
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l2_pher_fix.png}
+        \caption{}
+        \label{sfig:l2_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l2_ants_fix.png}
+        \caption{}
+        \label{sfig:l2_ants_fix}
+    \end{subfigure}
+
+    \caption{\textbf{Limited training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for policies $n=0, 1, 2$.}
+    \label{fig:grid_part1}
+\end{figure}
+
+% ==========================================
+% FIGURE 2: Policies n=3, n=4, n=5
+% ==========================================
+
+\begin{figure}[H]
+    \centering
+    % Row 1: n=3
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l3_pher_fix.png}
+        \caption{}
+        \label{sfig:l3_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l3_ants_fix.png}
+        \caption{}
+        \label{sfig:l3_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 2: n=4
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l4_pher_fix.png}
+        \caption{}
+        \label{sfig:l4_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l4_ants_fix.png}
+        \caption{}
+        \label{sfig:l4_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 3: n=5
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l5_pher_fix.png}
+        \caption{}
+        \label{sfig:l5_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l5_ants_fix.png}
+        \caption{}
+        \label{sfig:l5_ants_fix}
+    \end{subfigure}
+
+    \caption{\textbf{Limited training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for policies $n=3, 4, 5$.}
+    \label{fig:grid_part2}
+\end{figure}
+
+% ==========================================
+% FIGURE 3: Policies n=6, n=7, n=8
+% ==========================================
+\begin{figure}[H]
+    \centering
+    % Row 1: n=6
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l6_pher_fix.png}
+        \caption{}
+        \label{sfig:l6_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l6_ants_fix.png}
+        \caption{}
+        \label{sfig:l6_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 2: n=7
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l7_pher_fix.png}
+        \caption{}
+        \label{sfig:l7_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l7_ants_fix.png}
+        \caption{}
+        \label{sfig:l7_ants_fix}
+    \end{subfigure}
+    \vspace{0.3cm}
+
+    % Row 3: n=8
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l8_pher_fix.png}
+        \caption{}
+        \label{sfig:l8_pher_fix}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.40\textwidth}
+        \includegraphics[width=\textwidth]{images/l8_ants_fix.png}
+        \caption{}
+        \label{sfig:l8_ants_fix}
+    \end{subfigure}
+
+    \caption{\textbf{Limited training scenario: testing}. Phase diagrams of pheromone (left) and ABM-ants density (right) for policies $n=6, 7, 8$.}
+    \label{fig:grid_part3}
+\end{figure}
+
+\begin{comment}
+
+
+\begin{table}[t]
+\centering
+\resizebox{0.9999\textwidth}{!}{
+\begin{tabular}{|l|rrrrrr|rrrrrr|}
+\toprule 
+$\quad$ & $\quad$ & $\quad$ & $\langle\mathcal{TS}\rangle$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\langle\mathcal{TS}\rangle_{50}$ & $\quad$ & $\quad$ & $\quad$\\
+\midrule
+\diagbox[innerwidth=0.4cm]{$\beta$}{$\delta$} & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 \\
+\midrule
+$\quad$ & \multicolumn{2}{l}{baseline} & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$  \\
+\midrule
+9.5 & -2.73  & -2.89 & -2.67  & -3.50  & -3.69 & -4.30 & -1.66           & \textbf{-1.43}  & \textbf{-0.62} & \textbf{-1.11}  & \textbf{-0.55} & \textbf{-1.02} \\
+8.5 & -2.94  & -3.63 & -3.13  & -4.92  & -5.14 & -5.22 & \textbf{-1.03}  & \textbf{-1.21}  & \textbf{-0.60} & \textbf{-1.36}  & -1.76          & -1.66 \\
+7.5 & -4.14  & -4.59 & -6.19  & -7.14  & -8.53 & -8.77 & \textbf{-0.79}  & \textbf{-0.72}  & \textbf{-0.97} & -2.39           & -5.78          & -7.36 \\  
+6.5 & -7.25  & -7.91 & -8.75  & -9.66  & -9.59 & -9.13 & -2.79           & -5.00           & -7.63          & -11.41          & -9.36          & -8.15 \\
+5.5 & -9.71  & -9.36 & -9.61  & -9.63  & -9.62 & -9.81 & -9.67           & -8.18           & -9.81          & -9.31           & -9.02          & -9.49 \\
+4.5 & -10.03 & -10.51 & -9.34 & -10.16 & -9.35 & -9.81 & -11.09          & -10.04          & -9.36          & -10.76          & -9.43          & -9.94 \\
+3.5 & -9.90 & -10.63 & -9.96 & -9.78 & -10.14 & -10.05 & -9.83           & -10.33          & -9.74          & -9.62           & -9.83          & -9.84 \\
+\midrule
+$\quad$ & \multicolumn{3}{l}{enhanced hybrid} & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$  \\
+\midrule
+9.5 & -9.47 & -8.88 & -8.37 & -6.90 & -4.42 & -3.10 & -9.32          & -8.57          & -7.50          & -5.78          & -3.06          & \textbf{-1.47} \\
+8.5 & -9.24 & -9.16 & -6.39 & -4.30 & -3.10 & -2.62 & -8.72          & -8.43          & -5.02          & -2.85          & -1.80          & \textbf{-1.33} \\
+7.5 & -7.61 & -6.44 & -3.76 & -2.57 & -2.37 & -2.18 & -7.09          & -5.25          & -2.54          & -1.75          & -1.66          & \textbf{-1.32} \\
+6.5 & -6.10 & -2.85 & -2.51 & -2.36 & -2.14 & -2.61 & -4.93          & \textbf{-1.59} & \textbf{-1.29} & \textbf{-1.20} & \textbf{-1.24} & -1.81 \\
+5.5 & -3.10 & -2.21 & -2.29 & -2.29 & -2.85 & -3.44 & -2.03          & \textbf{-1.18} & \textbf{-1.36} & -1.63          & -2.32          & -3.12 \\
+4.5 & -2.14 & -2.39 & -3.05 & -3.68 & -4.37 & -4.97 & \textbf{-1.01} & \textbf{-1.48} & -2.46          & -2.90          & -3.81          & -4.76 \\
+3.5 & -3.39 & -4.11 & -4.63 & -5.87 & -6.18 & -6.75 & -2.54          & -3.75          & -4.48          & -5.08          & -5.71          & -7.45 \\
+\midrule
+$\quad$ & \multicolumn{3}{l}{smart hybrid} & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$ & $\quad$  \\
+\midrule
+9.5 & -1.56 & -1.92 & -2.23 & -1.85 & -2.16 & -2.38 & \textbf{-0.73} & \textbf{-1.18} & \textbf{-1.24} & \textbf{-1.02} & \textbf{-1.16} & \textbf{-1.22} \\
+8.5 & -1.90 & -1.61 & -1.90 & -2.32 & -1.89 & -2.15 & \textbf{-1.28} & \textbf{-0.82} & \textbf{-0.85} & \textbf{-1.22} & \textbf{-0.95} & \textbf{-1.17} \\
+7.5 & -1.89 & -2.01 & -2.02 & -2.53 & -2.50 & -2.21 & \textbf{-1.25} & \textbf{-1.11} & \textbf{-1.17} & -1.68          & -1.62          & \textbf{-1.17} \\
+6.5 & -1.90 & -1.74 & -2.34 & -2.86 & -2.27 & -2.89 & \textbf{-1.16} & \textbf{-0.86} & \textbf{-1.44} & \textbf{-1.38} & \textbf{-1.11} & -1.87          \\
+5.5 & -2.06 & -2.14 & -2.31 & -3.09 & -2.90 & -2.99 & \textbf{-1.08} & \textbf{-1.19} & \textbf{-1.14} & \textbf{-1.50} & \textbf{-1.50} & \textbf{-1.51} \\
+4.5 & -2.34 & -2.34 & -2.26 & -2.96 & -2.99 & -3.78 & \textbf{-1.18} & \textbf{-0.90} & \textbf{-1.33} & -1.97          & -\textbf{1.59} & -2.66          \\
+3.5 & -2.60 & -3.14 & -3.82 & -4.07 & -4.07 & -4.40 & \textbf{-1.41} & -1.86          & -2.45          & -2.75          & -2.71          & -2.70          \\
+ \bottomrule
+\end{tabular}
+}
+\caption{\textbf{Average trails scenario metric}. Simulation settings included: (1) $N$ ABM-ants (baseline population) (2) baseline population mixed with $N_{\eta=1}$ ABM-ants releasing higher pheromone (enhanced hybrid),(3) baseline population plus $N'$ smart-agents trained across the full phase space (smart hybrid).}
+ \label{tab:order_par_tab1}
+\end{table}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{images/cavgbase50b.png}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{images/cavgbase50b2.png}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}
+    
+\end{comment}
+
+\begin{comment}
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -1.66 & -1.43 & -0.62 & -1.11 & -0.55 & -1.02 \\
+$8.5$ & -1.03 & -1.21 & -0.60 & -1.36 & -1.76 & -1.66 \\
+$7.5$ & -0.79 & -0.72 & -0.97 & -2.39 & -5.78 & -7.36 \\
+$6.5$ & -2.79 & -5.00 & -7.63 & -11.41 & -9.36 & -8.15 \\
+$5.5$ & -9.67 & -8.18 & -9.81 & -9.31 & -9.02 & -9.49 \\
+$4.5$ & -11.09 & -10.04 & -9.36 & -10.76 & -9.43 & -9.94 \\
+$3.5$ & -9.83 & -10.33 & -9.74 & -9.62 & -9.83 & -9.84 \\
+\bottomrule
+\end{tabular}
+\caption{$\langle\mathcal{TS}\rangle_{50}$ baseline}
+\end{table}
+
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -2.73 & -2.89 & -2.67 & -3.50 & -3.69 & -4.30 \\
+$8.5$ & -2.94 & -3.63 & -3.13 & -4.92 & -5.14 & -5.22 \\
+$7.5$ & -4.14 & -4.59 & -6.19 & -7.14 & -8.53 & -8.77 \\
+$6.5$ & -7.25 & -7.91 & -8.75 & -9.66 & -9.59 & -9.13 \\
+$5.5$ & -9.71 & -9.36 & -9.61 & -9.63 & -9.62 & -9.81 \\
+$4.5$ & -10.03 & -10.51 & -9.34 & -10.16 & -9.35 & -9.81 \\
+$3.5$ & -9.90 & -10.63 & -9.96 & -9.78 & -10.14 & -10.05 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle$ baseline}
+\label{tab:r4_mean}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -0.73 & -1.18 & -1.24 & -1.02 & -1.16 & -1.22 \\
+$8.5$ & -1.28 & -0.82 & -0.85 & -1.22 & -0.95 & -1.17 \\
+$7.5$ & -1.25 & -1.11 & -1.17 & -1.68 & -1.62 & -1.17 \\
+$6.5$ & -1.16 & -0.86 & -1.44 & -1.38 & -1.11 & -1.87 \\
+$5.5$ & -1.08 & -1.19 & -1.14 & -1.50 & -1.50 & -1.51 \\
+$4.5$ & -1.18 & -0.90 & -1.33 & -1.97 & -1.59 & -2.66 \\
+$3.5$ & -1.41 & -1.86 & -2.45 & -2.75 & -2.71 & -2.70 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle_{50}$ smart-agents}
+\label{tab:r4_mean}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -1.56 & -1.92 & -2.23 & -1.85 & -2.16 & -2.38 \\
+$8.5$ & -1.90 & -1.61 & -1.90 & -2.32 & -1.89 & -2.15 \\
+$7.5$ & -1.89 & -2.01 & -2.02 & -2.53 & -2.50 & -2.21 \\
+$6.5$ & -1.90 & -1.74 & -2.34 & -2.86 & -2.27 & -2.89 \\
+$5.5$ & -2.06 & -2.14 & -2.31 & -3.09 & -2.90 & -2.99 \\
+$4.5$ & -2.34 & -2.34 & -2.26 & -2.96 & -2.99 & -3.78 \\
+$3.5$ & -2.60 & -3.14 & -3.82 & -4.07 & -4.07 & -4.40 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle$ smart-agents}
+\label{tab:r4_mean}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -9.32 & -8.57 & -7.50 & -5.78 & -3.06 & -1.47 \\
+$8.5$ & -8.72 & -8.43 & -5.02 & -2.85 & -1.80 & -1.33 \\
+$7.5$ & -7.09 & -5.25 & -2.54 & -1.75 & -1.66 & -1.32 \\
+$6.5$ & -4.93 & -1.59 & -1.29 & -1.20 & -1.24 & -1.81 \\
+$5.5$ & -2.03 & -1.18 & -1.36 & -1.63 & -2.32 & -3.12 \\
+$4.5$ & -1.01 & -1.48 & -2.46 & -2.90 & -3.81 & -4.76 \\
+$3.5$ & -2.54 & -3.75 & -4.48 & -5.08 & -5.71 & -7.45 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle_{50}$ enhanced}
+\label{tab:r4_mean}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -9.47 & -8.88 & -8.37 & -6.90 & -4.42 & -3.10 \\
+$8.5$ & -9.24 & -9.16 & -6.39 & -4.30 & -3.10 & -2.62 \\
+$7.5$ & -7.61 & -6.44 & -3.76 & -2.57 & -2.37 & -2.18 \\
+$6.5$ & -6.10 & -2.85 & -2.51 & -2.36 & -2.14 & -2.61 \\
+$5.5$ & -3.10 & -2.21 & -2.29 & -2.29 & -2.85 & -3.44 \\
+$4.5$ & -2.14 & -2.39 & -3.05 & -3.68 & -4.37 & -4.97 \\
+$3.5$ & -3.39 & -4.11 & -4.63 & -5.87 & -6.18 & -6.75 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle$ enhanced}
+\label{tab:r4_mean}
+\end{table}
+\end{comment}
+
+\begin{comment}
+\begin{table}[h!]
+\centering
+\caption{Actor network architecture.}
+\label{tab:actor}
+\begin{tabular}{|l|c|c|c|c|c|c|}
+\hline
+\textbf{Layer} & \textbf{Units / Filters} & \textbf{Kernel} & \textbf{Stride} & \textbf{Activation} & \textbf{BatchNorm} & \textbf{Dropout} \\
+\hline
+Conv1   & 32  & $3 \times 3$ & 1 & ReLU   & Yes & 0.0 \\
+Conv2   & 16  & $3 \times 3$ & 1 & ReLU   & Yes & 0.0 \\
+Dense1  & 256 & --           & -- & ReLU & Yes & 0.0 \\
+Dense2  & 128 & --           & -- & ReLU & Yes & 0.0 \\
+Output  & --  & --           & -- & Linear & -- & -- \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h!]
+\centering
+\caption{Critic network architecture.}
+\label{tab:critic}
+\begin{tabular}{|l|c|c|c|c|c|c|}
+\hline
+\textbf{Layer} & \textbf{Units / Filters} & \textbf{Kernel} & \textbf{Stride} & \textbf{Activation} & \textbf{BatchNorm} & \textbf{Dropout} \\
+\hline
+Conv1   & 32  & $3 \times 3$ & 1 & ReLU   & Yes & 0.0 \\
+Conv2   & 16  & $3 \times 3$ & 1 & ReLU   & Yes & 0.0 \\
+Dense1  & 256 & --           & -- & ReLU & Yes & 0.0 \\
+Dense2  & 128 & --           & -- & ReLU & Yes & 0.0 \\
+Output  & --  & --           & -- & Linear & -- & -- \\
+\hline
+\end{tabular}
+\end{table}
+\end{comment}
+
+\begin{comment}
+\section{Additional material (ongoing)}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{images/boxplot_m.png}
+    \caption{boxplot $m(T)$ aggregated}
+    \label{fig:placeholder}
+\end{figure}
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{images/boxplot_M.png}
+    \caption{boxplot $M(T)$ aggregated}
+    \label{fig:placeholder}
+\end{figure}
+
+\subsection{new scenarios}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & -1.26 & -1.27 & -0.71 & -0.62 & -0.80 & -0.66 \\
+$8.5$ & -0.91 & -0.93 & -0.81 & -0.39 & -0.89 & -1.57 \\
+$7.5$ & -0.75 & -0.61 & -1.48 & -1.47 & -3.51 & -5.66 \\
+$6.5$ & -0.92 & -1.77 & -3.95 & -8.10 & -8.14 & -8.17 \\
+$5.5$ & -8.03 & -8.53 & -8.94 & -9.32 & -10.18 & -9.46 \\
+$4.5$ & -10.14 & -11.14 & -9.07 & -9.95 & -10.07 & -9.69 \\
+$3.5$ & -9.09 & -10.23 & -9.66 & -10.58 & -10.51 & -10.63 \\
+\bottomrule
+\end{tabular}%
+\caption{$\langle\mathcal{TS}\rangle_{50}$ baseline N=330}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & 1.00 & 0.99 & 1.00 & 0.98 & 0.97 & 0.98 \\
+$8.5$ & 1.00 & 0.99 & 0.98 & 0.99 & 0.93 & 0.89 \\
+$7.5$ & 0.99 & 0.97 & 0.92 & 0.89 & 0.73 & 0.49 \\
+$6.5$ & 0.94 & 0.86 & 0.65 & 0.34 & 0.23 & 0.22 \\
+$5.5$ & 0.32 & 0.22 & 0.21 & 0.20 & 0.19 & 0.19 \\
+$4.5$ & 0.18 & 0.18 & 0.18 & 0.17 & 0.18 & 0.17 \\
+$3.5$ & 0.16 & 0.16 & 0.16 & 0.16 & 0.16 & 0.16 \\
+\bottomrule
+\end{tabular}%
+\caption{$M(T)$ baseline N=330}\label{tab:r4_mean}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{crrrrrr}
+\toprule
+\diagbox[innerwidth=1.6cm]{$\beta$}{$\delta$} & $0.3$ & $0.4$ & $0.5$ & $0.6$ & $0.7$ & $0.8$ \\
+\midrule
+$9.5$ & 1.00 & 0.99 & 0.99 & 0.98 & 0.96 & 0.98 \\
+$8.5$ & 1.00 & 0.99 & 0.98 & 0.99 & 0.90 & 0.85 \\
+$7.5$ & 0.99 & 0.95 & 0.87 & 0.83 & 0.64 & 0.34 \\
+$6.5$ & 0.93 & 0.82 & 0.57 & 0.29 & 0.19 & 0.20 \\
+$5.5$ & 0.28 & 0.19 & 0.20 & 0.17 & 0.21 & 0.21 \\
+$4.5$ & 0.20 & 0.18 & 0.18 & 0.19 & 0.21 & 0.20 \\
+$3.5$ & 0.19 & 0.24 & 0.20 & 0.18 & 0.18 & 0.21 \\
+\bottomrule
+\end{tabular}%
+\caption{$m(T)$ baseline N=330}\label{tab:r4_mean}
+\label{tab:r4_mean}
+\end{table}
+\end{comment}

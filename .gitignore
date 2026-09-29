@@ -31,11 +31,11 @@ plots/
 !**/edge_spen/l[0-9]/results_test
 
 # Ignora tutto ciò che è contenuto nella cartella latex
-latex/*
+Latex/*
 
 # Eccezione: mantieni i file .tex nella cartella latex
-!latex/*.tex
+!Latex/*.tex
 
 # Eccezione per le eventuali sottocartelle contenenti altri file .tex
-!latex/**/*.tex
-!latex/**/
+!Latex/**/*.tex
+!Latex/**/
